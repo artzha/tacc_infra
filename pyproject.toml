@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tacc-tools"
+version = "0.1.0"
+description = "Helper utilities for Apptainer/Singularity ROS bag operations"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "TACC Tools Contributors", email = "support@tacc.utexas.edu"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Robotics",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10", 
+    "Programming Language :: Python :: 3.11",
+]
+keywords = ["robotics", "ros", "rosbag", "singularity", "apptainer", "tacc", "hpc"]
+requires-python = ">=3.8"
+dependencies = [
+    "pyyaml>=6.0",
+    "pandas>=1.3.0",
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+ros1 = [
+    "rosbag",
+    "rospkg",
+]
+ros2 = [
+    "rosbag2-py",
+]
+visualization = [
+    "matplotlib>=3.3.0",
+    "plotly>=5.0.0", 
+    "seaborn>=0.11.0",
+]
+remote = [
+    "paramiko>=2.7.0",
+    "scp>=0.13.0",
+]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "black>=21.0",
+    "flake8>=3.8",
+    "mypy>=0.800",
+]
+
+[project.scripts]
+tacc-download-rosbag = "tacc_tools.scripts.download_rosbag:main" 
+tacc-visualize-rosbag = "tacc_tools.scripts.visualize_rosbag:main"
+
+[project.urls]
+Homepage = "https://github.com/artzha/tacc-tools"
+"Bug Reports" = "https://github.com/artzha/tacc-tools/issues"
+Source = "https://github.com/artzha/tacc-tools"
+
+[tool.setuptools.packages.find]
+include = ["tacc_tools*"]
+
+[tool.setuptools.package-data]
+tacc_tools = [
+    "containers/*.def",
+    "config/*.yaml", 
+    "scripts/*.py"
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

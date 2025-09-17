@@ -1,0 +1,50 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%post
+    # Update and install basic tools
+    apt-get update && apt-get install -y \
+        wget \
+        curl \
+        rsync \
+        openssh-client \
+        python3 \
+        python3-pip \
+        git \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install additional tools for file transfer
+    pip3 install \
+        paramiko \
+        scp \
+        requests
+
+    # Create directories for mounting
+    mkdir -p /output /ssh_keys
+
+%environment
+    export LC_ALL=C
+
+%labels
+    Author TACC Tools Contributors
+    Version v1.0
+    Description Container for downloading ROS bags remotely
+
+%help
+    This container provides tools for downloading ROS bag files from remote hosts.
+    
+    Available tools:
+    - rsync: Efficient file synchronization
+    - wget: Download files from URLs
+    - ssh: Secure shell client
+    - python3: Python with network libraries
+    
+    Usage examples:
+    
+    # Download via rsync
+    apptainer exec --bind /local/path:/output rosbag_downloader.sif \
+        rsync -avz user@host:/remote/path/ /output/
+    
+    # Download via wget
+    apptainer exec --bind /local/path:/output rosbag_downloader.sif \
+        wget -P /output http://example.com/file.bag

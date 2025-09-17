@@ -1,0 +1,190 @@
+Bootstrap: docker
+From: ros:humble-desktop-full
+
+%post
+    # Update and install additional tools
+    apt-get update && apt-get install -y \
+        python3-pip \
+        python3-rosbag2 \
+        ros-humble-rosbag2-storage-default-plugins \
+        ros-humble-rviz2 \
+        ros-humble-rqt \
+        ros-humble-rqt-common-plugins \
+        ros-humble-plotjuggler-ros \
+        python3-matplotlib \
+        python3-pandas \
+        python3-numpy \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install ROS 1 tools for compatibility
+    apt-get update && apt-get install -y \
+        python3-rosbag \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install additional Python packages for data analysis
+    pip3 install \
+        rosbag \
+        bagpy \
+        plotly \
+        seaborn
+
+    # Create directories for mounting
+    mkdir -p /bags /output /config /scripts
+
+    # Create bag to CSV conversion script
+    cat > /scripts/bag_to_csv.py << 'EOF'
+#!/usr/bin/env python3
+"""
+Convert ROS bag topics to CSV files.
+"""
+import argparse
+import sys
+from pathlib import Path
+
+try:
+    import rosbag
+    import pandas as pd
+    from geometry_msgs.msg import Twist, PoseStamped
+    from sensor_msgs.msg import LaserScan, PointCloud2
+    ROS1_AVAILABLE = True
+except ImportError:
+    ROS1_AVAILABLE = False
+
+try:
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    ROS2_AVAILABLE = True
+except ImportError:
+    ROS2_AVAILABLE = False
+
+def convert_ros1_bag(bag_path, output_dir, topics=None):
+    """Convert ROS 1 bag to CSV."""
+    if not ROS1_AVAILABLE:
+        print("ROS 1 libraries not available")
+        return False
+    
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    with rosbag.Bag(bag_path, 'r') as bag:
+        bag_topics = bag.get_type_and_topic_info()[1].keys()
+        topics_to_convert = topics if topics else bag_topics
+        
+        for topic in topics_to_convert:
+            if topic in bag_topics:
+                print(f"Converting topic: {topic}")
+                messages = []
+                
+                for topic_name, msg, t in bag.read_messages(topics=[topic]):
+                    msg_dict = {
+                        'timestamp': t.to_sec(),
+                        'topic': topic_name
+                    }
+                    
+                    # Add message fields based on type
+                    if hasattr(msg, 'linear') and hasattr(msg, 'angular'):
+                        # Twist message
+                        msg_dict.update({
+                            'linear_x': msg.linear.x,
+                            'linear_y': msg.linear.y,
+                            'linear_z': msg.linear.z,
+                            'angular_x': msg.angular.x,
+                            'angular_y': msg.angular.y,
+                            'angular_z': msg.angular.z
+                        })
+                    elif hasattr(msg, 'pose'):
+                        # PoseStamped message
+                        msg_dict.update({
+                            'position_x': msg.pose.position.x,
+                            'position_y': msg.pose.position.y,
+                            'position_z': msg.pose.position.z,
+                            'orientation_x': msg.pose.orientation.x,
+                            'orientation_y': msg.pose.orientation.y,
+                            'orientation_z': msg.pose.orientation.z,
+                            'orientation_w': msg.pose.orientation.w
+                        })
+                    else:
+                        # Generic message - convert to string
+                        msg_dict['data'] = str(msg)
+                    
+                    messages.append(msg_dict)
+                
+                if messages:
+                    df = pd.DataFrame(messages)
+                    csv_file = output_dir / f"{topic.replace('/', '_')}.csv"
+                    df.to_csv(csv_file, index=False)
+                    print(f"Saved: {csv_file}")
+    
+    return True
+
+def convert_ros2_bag(bag_path, output_dir, topics=None):
+    """Convert ROS 2 bag to CSV."""
+    print("ROS 2 bag conversion not fully implemented yet")
+    return False
+
+def main():
+    parser = argparse.ArgumentParser(description='Convert ROS bag to CSV')
+    parser.add_argument('bag_path', help='Path to ROS bag file')
+    parser.add_argument('output_dir', help='Output directory for CSV files')
+    parser.add_argument('--topics', nargs='+', help='Specific topics to convert')
+    
+    args = parser.parse_args()
+    
+    bag_path = Path(args.bag_path)
+    if not bag_path.exists():
+        print(f"Bag file not found: {bag_path}")
+        sys.exit(1)
+    
+    # Determine bag type
+    if bag_path.suffix == '.bag':
+        success = convert_ros1_bag(args.bag_path, args.output_dir, args.topics)
+    else:
+        success = convert_ros2_bag(args.bag_path, args.output_dir, args.topics)
+    
+    sys.exit(0 if success else 1)
+
+if __name__ == '__main__':
+    main()
+EOF
+
+    chmod +x /scripts/bag_to_csv.py
+
+%environment
+    export LC_ALL=C
+    export ROS_DOMAIN_ID=0
+    # Source ROS setup
+    . /opt/ros/humble/setup.sh
+
+%labels
+    Author TACC Tools Contributors
+    Version v1.0
+    Description Container for visualizing and analyzing ROS bags
+
+%help
+    This container provides tools for visualizing and analyzing ROS bag files.
+    
+    Available tools:
+    - rosbag (ROS 1): Record and play ROS 1 bags
+    - ros2 bag (ROS 2): Record and play ROS 2 bags
+    - rviz2: 3D visualization tool
+    - rqt: GUI tool framework
+    - plotjuggler: Real-time plotting tool
+    - Custom bag_to_csv.py script
+    
+    Usage examples:
+    
+    # Get bag info
+    apptainer exec --bind /path/to/bags:/bags rosbag_visualizer.sif \
+        rosbag info /bags/example.bag
+    
+    # Play bag
+    apptainer exec --bind /path/to/bags:/bags rosbag_visualizer.sif \
+        rosbag play /bags/example.bag
+    
+    # Convert to CSV
+    apptainer exec --bind /path/to/bags:/bags --bind /output:/output rosbag_visualizer.sif \
+        python3 /scripts/bag_to_csv.py /bags/example.bag /output
+    
+    # Launch RViz (requires X11 forwarding)
+    apptainer exec --bind /tmp/.X11-unix:/tmp/.X11-unix --env DISPLAY=$DISPLAY rosbag_visualizer.sif \
+        rviz2
