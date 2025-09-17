@@ -11,8 +11,15 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from rosbag_downloader import RosbagDownloader
-from container_manager import ContainerManager
+try:
+    from ..rosbag_downloader import RosbagDownloader
+    from ..container_manager import ContainerManager
+except ImportError:
+    # Fallback for direct script execution
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from rosbag_downloader import RosbagDownloader
+    from container_manager import ContainerManager
 
 def setup_logging(verbose: bool = False):
     """Setup logging configuration."""
