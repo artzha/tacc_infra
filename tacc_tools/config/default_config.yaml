@@ -1,0 +1,67 @@
+# TACC Tools Default Configuration
+# Configuration file for container and ROS bag operations
+
+# Container settings
+containers:
+  # Directory containing Singularity definition files
+  definition_dir: "containers"
+  
+  # Default container images
+  downloader: "rosbag_downloader"
+  visualizer: "rosbag_visualizer"
+  
+  # Container build options
+  build:
+    force_rebuild: false
+    output_dir: "."
+
+# Download settings
+download:
+  # Default SSH settings
+  ssh:
+    port: 22
+    timeout: 30
+    
+  # Default rsync options
+  rsync:
+    options: ["-avz", "--progress"]
+    
+  # Default wget options
+  wget:
+    options: ["--progress=bar:force", "--timeout=30"]
+
+# Visualization settings
+visualization:
+  # Default playback settings
+  playback:
+    rate: 1.0
+    buffer_size: 200
+    
+  # RViz settings
+  rviz:
+    display_config: null
+    
+  # CSV conversion settings
+  csv:
+    include_timestamp: true
+    topic_prefix: false
+
+# Remote host configurations (examples)
+remote_hosts:
+  example_robot:
+    host: "robot.example.com"
+    username: "ubuntu"
+    ssh_key: "~/.ssh/robot_key"
+    data_path: "/data/rosbags"
+    
+  tacc_system:
+    host: "tacc.example.edu"  
+    username: "taccuser"
+    ssh_key: "~/.ssh/tacc_key"
+    data_path: "/scratch/rosbags"
+
+# Logging settings
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: null  # Set to file path to enable file logging
