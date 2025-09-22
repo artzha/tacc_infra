@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taccenv"
+version = "0.1.0"
+description = "Thin CLI to run repo scripts under tacc_infra/"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "You"}]
+
+# no runtime deps required; add if you need them later
+dependencies = []
+
+[project.scripts]
+taccenv = "taccenv.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["taccenv", "tacc_infra"]
+
+# include non-Python files from tacc_infra (all files)
+[tool.setuptools.package-data]
+tacc_infra = ["**/*"]
