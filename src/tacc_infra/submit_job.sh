@@ -4,12 +4,11 @@
 
 set -euo pipefail
 
+CLUSTER="${CLUSTER:-tacc}"    # tacc | ncsa
 PARTITION=""
-TIME_REQ="00:30:00"          # HH:MM:SS
-ACCOUNT="${SLURM_ACCOUNT:-}" # or pass -A/--account
-NODES=1
-CPUS=1
-MEM=""
+TIME_REQ="00:30:00"           # HH:MM:SS
+ACCOUNT="${SLURM_ACCOUNT:-}"  # or pass -A/--account
+EXTRA_ARGS=()
 
 # Slack config
 SLACK_WEBHOOK="${SLACK_WEBHOOK_URL:-}"       # incoming webhook URL
@@ -36,14 +35,18 @@ EOS
 usage() {
   cat <<EOF
 Usage:
-  taccenv submit_job --time HH:MM:SS --partition NAME -A ACCOUNT [options]
+  taccenv submit_job --cluster tacc|ncsa --time HH:MM:SS --partition NAME -A ACCOUNT [options]
 
 Required:
+  --cluster tacc|ncsa    Cluster type (default: ${CLUSTER})
   --time HH:MM:SS        Wall time (default: ${TIME_REQ})
   --partition NAME       Queue/partition (e.g., normal, gpu-a100-small)
   -A, --account NAME     Allocation (or set SLURM_ACCOUNT)
 
-Optional (fallback only): --nodes N  --cpus N  --mem SIZE
+Optional:
+  Any other arguments are passed through to the underlying command:
+    - TACC: idev (preferred) or salloc fallback
+    - NCSA: srun
 Slack:
   --slack-webhook URL          (or env SLACK_WEBHOOK_URL)
   --slack-mention-id USERID    Mention user by ID (e.g., U012ABCDEF)  (or env SLACK_MENTION_ID)
@@ -58,20 +61,24 @@ EOF
 if [[ $# -eq 0 ]]; then usage; echo; list_partitions; exit 0; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --cluster) CLUSTER="$2"; shift 2;;
     --time) TIME_REQ="$2"; shift 2;;
     --partition) PARTITION="$2"; shift 2;;
     -A|--account) ACCOUNT="$2"; shift 2;;
-    --nodes) NODES="$2"; shift 2;;
-    --cpus) CPUS="$2"; shift 2;;
-    --mem) MEM="$2"; shift 2;;
     --slack-webhook) SLACK_WEBHOOK="$2"; shift 2;;
     --slack-mention-id) SLACK_MENTION_ID="$2"; shift 2;;
     --slack-mention) SLACK_MENTION="$2"; shift 2;;
     --list) list_partitions; exit 0;;
     -h|--help) usage; exit 0;;
-    *) die "Unknown argument: $1";;
+    --) shift; EXTRA_ARGS+=( "$@" ); break;;
+    *) EXTRA_ARGS+=( "$1" ); shift;;
   esac
 done
+
+case "${CLUSTER}" in
+  tacc|ncsa) ;;
+  *) die "--cluster must be 'tacc' or 'ncsa' (got: ${CLUSTER})" ;;
+esac
 
 [[ -n "$PARTITION" ]] || die "--partition is required (use --list)"
 [[ -n "$ACCOUNT"   ]] || die "--account/-A is required (or set SLURM_ACCOUNT)"
@@ -164,37 +171,49 @@ idev_watch_until_running_by_time() {
 }
 
 # ---- launch ----
-if command -v idev >/dev/null 2>&1; then
+if [[ "${CLUSTER}" == "tacc" ]] && command -v idev >/dev/null 2>&1; then
   # Convert HH:MM:SS → minutes for idev
   IFS=: read -r HH MM SS <<<"${TIME_REQ}"
   MINUTES=$((10#$HH*60 + 10#$MM + (10#$SS > 0 ? 1 : 0)))  # round up if seconds present
 
   # ⏳ queued
-  slack_post ":hourglass_flowing_sand: \`taccenv\` requested *interactive* on \`${HOSTNAME_SHORT}\` — queue \`${PARTITION}\`, time \`${TIME_REQ}\`, account \`${ACCOUNT}\` (user: \`${USER_NAME}\`)."
+  slack_post ":hourglass_flowing_sand: \`taccenv\` requested *interactive* on \`${HOSTNAME_SHORT}\` — cluster \`${CLUSTER}\`, queue \`${PARTITION}\`, time \`${TIME_REQ}\`, account \`${ACCOUNT}\` (user: \`${USER_NAME}\`)."
 
   # mark time, start watcher
   MARK_EPOCH="$(date +%s)"
   ( idev_watch_until_running_by_time "$MARK_EPOCH" "$PARTITION" ) >/dev/null 2>&1 & disown
 
   echo "Launching interactive via idev:"
-  echo "  idev -m ${MINUTES} -p ${PARTITION} -A ${ACCOUNT}"
-  exec idev -m "${MINUTES}" -p "${PARTITION}" -A "${ACCOUNT}"
+  echo "  idev -m ${MINUTES} -p ${PARTITION} -A ${ACCOUNT} ${EXTRA_ARGS[*]}"
+  exec idev -m "${MINUTES}" -p "${PARTITION}" -A "${ACCOUNT}" "${EXTRA_ARGS[@]}"
 
 else
-  # salloc + srun fallback
-  ALLOC_CMD=( salloc --time="${TIME_REQ}" -p "${PARTITION}" -A "${ACCOUNT}" --nodes "${NODES}" --cpus-per-task "${CPUS}" )
-  [[ -n "${MEM}" ]] && ALLOC_CMD+=( --mem "${MEM}" )
+  if [[ "${CLUSTER}" == "ncsa" ]]; then
+    # NCSA: srun-based interactive
+    SRUN_CMD=( srun --account="${ACCOUNT}" --partition="${PARTITION}" --time="${TIME_REQ}" )
+    [[ ${#EXTRA_ARGS[@]} -gt 0 ]] && SRUN_CMD+=( "${EXTRA_ARGS[@]}" )
 
-  # ⏳ queued
-  slack_post ":hourglass_flowing_sand: \`taccenv\` requesting *interactive* (salloc) on \`${HOSTNAME_SHORT}\` — queue \`${PARTITION}\`, time \`${TIME_REQ}\`, account \`${ACCOUNT}\` (user: \`${USER_NAME}\`)."
+    slack_post ":hourglass_flowing_sand: \`taccenv\` requested *interactive* on \`${HOSTNAME_SHORT}\` — cluster \`${CLUSTER}\`, queue \`${PARTITION}\`, time \`${TIME_REQ}\`, account \`${ACCOUNT}\` (user: \`${USER_NAME}\`)."
 
-  echo "Allocating with: ${ALLOC_CMD[*]}"
-  if "${ALLOC_CMD[@]}"; then
-    # ✅ allocation granted
-    slack_post ":white_check_mark: Interactive allocation *granted* (queue \`${PARTITION}\`, user \`${USER_NAME}\`)."
-    exec srun --pty bash -l
+    echo "Launching interactive via srun:"
+    echo "  ${SRUN_CMD[*]}"
+    exec "${SRUN_CMD[@]}"
   else
-    slack_post ":x: Interactive allocation *failed* (queue \`${PARTITION}\`, user \`${USER_NAME}\`)."
-    exit 1
+    # TACC: salloc + srun fallback
+    ALLOC_CMD=( srun --time="${TIME_REQ}" -p "${PARTITION}" -A "${ACCOUNT}" )
+    [[ ${#EXTRA_ARGS[@]} -gt 0 ]] && ALLOC_CMD+=( "${EXTRA_ARGS[@]}" )
+
+    # ⏳ queued
+    slack_post ":hourglass_flowing_sand: \`taccenv\` requesting *interactive* (salloc) on \`${HOSTNAME_SHORT}\` — cluster \`${CLUSTER}\`, queue \`${PARTITION}\`, time \`${TIME_REQ}\`, account \`${ACCOUNT}\` (user: \`${USER_NAME}\`)."
+
+    echo "Allocating with: ${ALLOC_CMD[*]}"
+    if "${ALLOC_CMD[@]}"; then
+      # ✅ allocation granted
+      slack_post ":white_check_mark: Interactive allocation *granted* (queue \`${PARTITION}\`, user \`${USER_NAME}\`)."
+      exec srun --pty bash -l
+    else
+      slack_post ":x: Interactive allocation *failed* (queue \`${PARTITION}\`, user \`${USER_NAME}\`)."
+      exit 1
+    fi
   fi
 fi
